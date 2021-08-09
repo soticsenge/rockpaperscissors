@@ -1,41 +1,37 @@
-package com.example
+package com.example.socket_connector
 
 import akka.NotUsed
-import akka.actor.{ExtendedActorSystem, Terminated}
-import akka.actor.TypedActor.context
 import akka.actor.typed.ActorSystem
+import akka.actor.typed.scaladsl.adapter._
 import akka.http.scaladsl.model.ws.{Message, TextMessage}
 import akka.stream.OverflowStrategy
-import akka.actor.typed.scaladsl.adapter._
 import akka.stream.scaladsl.{Flow, Sink, Source}
+import akka.stream.typed.scaladsl.ActorSink
+import com.example.socket_connector.messages.WebsocketMsg
 
 import java.util.UUID
 
-class ClientHandlerFlow(implicit val system: ActorSystem[_]) {
+class ClientHandlerFlow()(implicit val system: ActorSystem[_]) {
   def websocketFlow(): Flow[Message, Message, NotUsed] = {
-    val handler = system.toClassic.asInstanceOf[ExtendedActorSystem].systemActorOf(ClientHandlerActor.props, "handler" + UUID.randomUUID())
+    val handler = system.systemActorOf(ClientHandlerActor(), "handler_" + UUID.randomUUID())
     val incomingMessages: Sink[Message, NotUsed] =
       Flow[Message]
         .collect {
           case TextMessage.Strict(text) =>
-            println(
-              s"Transforming incoming msg [$text] into domain msg"
-            )
+            system.log.info(s"Transforming incoming msg [$text] into domain msg.")
             WebsocketMsg.Incoming(text)
         }
-        .to(Sink.actorRef[WebsocketMsg.Incoming](handler, Terminated))
+        .to(ActorSink.actorRef[WebsocketMsg.Incoming](handler ,WebsocketMsg.Incoming(""), _ => WebsocketMsg.Incoming("")))
+
     val outgoingMessages: Source[Message, NotUsed] =
-      Source
-        .actorRef[WebsocketMsg.Outgoing](10, OverflowStrategy.fail)
+      Source.actorRef[WebsocketMsg](10, OverflowStrategy.fail)
         .mapMaterializedValue { userActor =>
           handler ! WebsocketMsg.Connected(userActor)
           NotUsed
         }
         .collect {
           case outMsg: WebsocketMsg.Outgoing =>
-            println(
-              s"Transforming domain msg [$outMsg] to websocket msg"
-            )
+            system.log.info(s"Transforming domain msg [$outMsg] to websocket msg.")
             TextMessage(outMsg.text)
         }
     Flow.fromSinkAndSourceCoupled(incomingMessages, outgoingMessages)

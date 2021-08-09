@@ -1,19 +1,19 @@
 package com.example
 
-import akka.actor.typed.ActorSystem
-import akka.actor.{ActorSystem => ClassicActorSystem}
+import akka.actor.typed.{ActorRef, ActorSystem}
 import akka.actor.typed.scaladsl.Behaviors
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Route
-import akka.actor.typed.scaladsl.adapter._
+import com.example.domain.GameFactoryActor
+import com.example.domain.messages.CreateGameMessageFromConnectorActor
+import com.example.domain.service.GameResultCalculatorService
 
-import scala.util.Failure
-import scala.util.Success
+import java.util.UUID
+import scala.util.{Failure, Success}
 
-object QuickstartApp {
+object Application {
   private def startHttpServer(routes: Route)(implicit system: ActorSystem[_]): Unit = {
     import system.executionContext
-
     val futureBinding = Http().newServerAt("localhost", 8080).bind(routes)
     futureBinding.onComplete {
       case Success(binding) =>
@@ -25,15 +25,15 @@ object QuickstartApp {
     }
   }
   def main(args: Array[String]): Unit = {
+    val gameService = new GameResultCalculatorService()
+    var gameFactoryActor: ActorRef[CreateGameMessageFromConnectorActor] = null
     val rootBehavior = Behaviors.setup[Nothing] { context =>
-      context.spawn(GameFactoryActor(),"gameFactory")
+      gameFactoryActor = context.spawn(GameFactoryActor(gameService, () => UUID.randomUUID()),"gameFactory")
       Behaviors.empty
     }
 
-    implicit val typesSystem = ActorSystem[Nothing](rootBehavior, "RpsServer")
-    val system: ClassicActorSystem = typesSystem.toClassic
-    val routes = new RpsRoutes()(system, typesSystem)
-    startHttpServer(routes.websocketEventsRoute)(typesSystem)
-
+    implicit val system: ActorSystem[Nothing] = ActorSystem[Nothing](rootBehavior, "RpsServer")
+    val routes = new RpsRoutes()(system)
+    startHttpServer(routes.websocketEventsRoute)(system)
   }
 }

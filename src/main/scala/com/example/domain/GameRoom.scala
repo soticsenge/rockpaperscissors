@@ -1,31 +1,32 @@
-package com.example
+package com.example.domain
 
-import akka.Done
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior}
-import com.example.Domain.{GameResult, GameStart}
+import com.example.domain.messages._
+import com.example.domain.service.GameResultCalculatorService
 
-import scala.concurrent.Future
 
 object GameRoom {
   def apply(name: String,
-            player1: ActorRef[Domain],
-            player2: ActorRef[Domain],
+            player1: ActorRef[PlayerDomainMessage],
+            player2: ActorRef[PlayerDomainMessage],
+            gameService: GameResultCalculatorService,
            ): Behavior[PlayerMovement] = {
     Behaviors.setup { ctx =>
-      new GameRoom(ctx, player1, player2).startGame
+      new GameRoom(ctx, player1, player2, gameService).startGame
     }
   }
 }
 
 class GameRoom(ctx: ActorContext[PlayerMovement],
-               player1: ActorRef[Domain],
-               player2: ActorRef[Domain],
+               player1: ActorRef[PlayerDomainMessage],
+               player2: ActorRef[PlayerDomainMessage],
+               gameService: GameResultCalculatorService,
               ) {
 
   private lazy val startGame: Behavior[PlayerMovement] = {
     player1 ! GameStart(ctx.self)
-    player2 ! GameStart(ctx.self)
+    player2 ! messages.GameStart(ctx.self)
     waitingForFirstMove
   }
 
@@ -45,23 +46,14 @@ class GameRoom(ctx: ActorContext[PlayerMovement],
                                  recievedMove: MoveType
                                ): Behavior[PlayerMovement] = {
     Behaviors.receiveMessagePartial {
-      case PlayerMovementMessage(`playerToWaitFor`, move2) => {
+      case PlayerMovementMessage(`playerToWaitFor`, move2) =>
         ctx.log.info(`playerToWaitFor`.path.name + " selected " + move2 + " as second")
-        ctx.log.info("Result: " + calculateWinner(playerRecieved.path.name, recievedMove, playerToWaitFor.path.name, move2))
-        val winnerId = calculateWinner(playerRecieved.path.name, recievedMove, playerToWaitFor.path.name, move2)
+        ctx.log.info("Result: " + gameService.calculateWinner(playerRecieved.path.name, recievedMove, playerToWaitFor.path.name, move2))
+        val winnerId = gameService.calculateWinner(playerRecieved.path.name, recievedMove, playerToWaitFor.path.name, move2)
         player1 ! GameResult(Map(playerToWaitFor.path.name -> move2, playerRecieved.path.name ->  recievedMove), winnerId)
         player2 ! GameResult(Map(playerToWaitFor.path.name -> move2, playerRecieved.path.name ->  recievedMove), winnerId)
         waitingForFirstMove
-      }
     }
-  }
-
-  private def calculateWinner(player1Name: String, player1Move: MoveType, player2Name: String, player2Move: MoveType): String = {
-    if ((player1Move.beats.contains(player2Move)) && !(player2Move.beats.contains(player2Move))) {
-      player1Name
-    } else if ((player2Move.beats.contains(player1Move)) && !(player1Move.beats.contains(player2Move))) {
-      player2Name
-    } else "draw"
   }
 }
 
